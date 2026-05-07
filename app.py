@@ -8,23 +8,27 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 from PIL import Image, UnidentifiedImageError
 from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 # -----------------------------
-# File paths
+# Paths
 # -----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MODEL_PATH = os.path.join(BASE_DIR, "best_resnet18_pharyngitis.pth")
 HTML_PATH = os.path.join(BASE_DIR, "pharyscan_web_app.html")
 
-MODEL_URL = "https://drive.google.com/uc?id=1nhaLsnCFmxj-WtnEPM6haATWY9VXVp2L"
+# Your Google Drive model file
+MODEL_FILE_ID = "1nhaLsnCFmxj-WtnEPM6haATWY9VXVp2L"
 
 CLASS_NAMES = ["no_pharyngitis", "pharyngitis"]
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = None
+model_error = None
 
 # -----------------------------
 # Image preprocessing
@@ -40,30 +44,42 @@ transform = transforms.Compose([
 
 
 # -----------------------------
-# Download model
+# Download model from Google Drive
 # -----------------------------
 def download_model_if_needed():
-    if os.path.exists(MODEL_PATH) and os.path.getsize(MODEL_PATH) > 0:
+    if os.path.exists(MODEL_PATH) and os.path.getsize(MODEL_PATH) > 1_000_000:
         print("Model already exists.")
         return
 
-    print("Model not found. Downloading from Google Drive...")
+    if os.path.exists(MODEL_PATH):
+        print("Existing model file is too small or corrupt. Removing it.")
+        os.remove(MODEL_PATH)
+
+    print("Downloading model from Google Drive...")
 
     downloaded = gdown.download(
-        MODEL_URL,
-        MODEL_PATH,
-        quiet=False,
-        fuzzy=True
+        id=MODEL_FILE_ID,
+        output=MODEL_PATH,
+        quiet=False
     )
 
     if downloaded is None:
-        raise RuntimeError("Model download failed. gdown returned None.")
+        raise RuntimeError(
+            "Model download failed. Make sure Google Drive sharing is set to: Anyone with the link -> Viewer."
+        )
 
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError("Model file was not created after download.")
 
-    if os.path.getsize(MODEL_PATH) == 0:
-        raise RuntimeError("Downloaded model file is empty.")
+    size = os.path.getsize(MODEL_PATH)
+    print(f"Downloaded model size: {size} bytes")
+
+    if size < 1_000_000:
+        raise RuntimeError(
+            f"Downloaded model file is too small: {size} bytes. "
+            "Google Drive probably returned an HTML page instead of the real .pth model. "
+            "Set sharing to: Anyone with the link -> Viewer."
+        )
 
     print("Model downloaded successfully.")
 
@@ -75,6 +91,8 @@ def load_model():
     global model
 
     download_model_if_needed()
+
+    print("Loading ResNet18 model...")
 
     net = models.resnet18(weights=None)
     net.fc = nn.Linear(net.fc.in_features, len(CLASS_NAMES))
@@ -90,8 +108,8 @@ def load_model():
         cleaned_checkpoint = {}
 
         for key, value in checkpoint.items():
-            new_key = key.replace("module.", "")
-            cleaned_checkpoint[new_key] = value
+            cleaned_key = key.replace("module.", "")
+            cleaned_checkpoint[cleaned_key] = value
 
         net.load_state_dict(cleaned_checkpoint)
         model = net
@@ -140,7 +158,7 @@ def home():
     if not os.path.exists(HTML_PATH):
         return jsonify({
             "success": False,
-            "error": "pharyscan_web_app.html file not found"
+            "error": "pharyscan_web_app.html not found"
         }), 500
 
     return send_file(HTML_PATH)
@@ -152,7 +170,10 @@ def health():
         "success": True,
         "status": "ok",
         "device": str(device),
-        "model_loaded": model is not None
+        "model_loaded": model is not None,
+        "model_error": model_error,
+        "model_exists": os.path.exists(MODEL_PATH),
+        "model_size_bytes": os.path.getsize(MODEL_PATH) if os.path.exists(MODEL_PATH) else 0
     }), 200
 
 
@@ -167,7 +188,7 @@ def predict():
         if model is None:
             return jsonify({
                 "success": False,
-                "error": "Model is not loaded. Check Render logs."
+                "error": model_error or "Model is not loaded. Check Render logs."
             }), 500
 
         if not request.files:
@@ -207,14 +228,18 @@ def predict():
 
         return jsonify({
             "success": True,
+
             "prediction": predicted_class,
             "class": predicted_class,
             "label": predicted_class,
             "result": predicted_class,
+
             "confidence": confidence_score,
             "confidence_score": confidence_score,
+
             "no_pharyngitis": no_pharyngitis_score,
             "pharyngitis": pharyngitis_score,
+
             "probabilities": {
                 "no_pharyngitis": no_pharyngitis_score,
                 "pharyngitis": pharyngitis_score
@@ -232,18 +257,19 @@ def predict():
 
 
 # -----------------------------
-# Load model when server starts
+# Load model when app starts
 # -----------------------------
 try:
     load_model()
-except Exception:
+except Exception as e:
+    model = None
+    model_error = str(e)
     print("Model loading failed:")
     traceback.print_exc()
-    model = None
 
 
 # -----------------------------
-# Run locally
+# Local run
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
