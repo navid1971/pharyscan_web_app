@@ -1,7 +1,6 @@
-flask
+Flask
 gunicorn
+gdown
 torch
 torchvision
-pillow
-numpy
-gdown
+Pillow
