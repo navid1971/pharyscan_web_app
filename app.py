@@ -1,5 +1,5 @@
 import os
-import io
+import gdown
 import torch
 import torch.nn as nn
 import torchvision.models as models
@@ -9,20 +9,42 @@ from flask import Flask, request, jsonify, send_file
 
 app = Flask(__name__)
 
+# -----------------------------
+# File paths
+# -----------------------------
 MODEL_PATH = "best_resnet18_pharyngitis.pth"
 HTML_PATH = "pharyscan_web_app.html"
 
+# Google Drive model link
+MODEL_URL = "https://drive.google.com/file/d/1nhaLsnCFmxj-WtnEPM6haATWY9VXVp2L/view?usp=sharing"
+
 CLASS_NAMES = ["no_pharyngitis", "pharyngitis"]
 
+# -----------------------------
+# Download model from Google Drive
+# -----------------------------
+if not os.path.exists(MODEL_PATH):
+    print("Model not found. Downloading from Google Drive...")
+    gdown.download(MODEL_URL, MODEL_PATH, quiet=False, fuzzy=True)
+
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError("Model download failed. Check Google Drive sharing settings.")
+
+    print("Model downloaded successfully.")
+
+# -----------------------------
+# Device setup
+# -----------------------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# -----------------------------
 # Load ResNet18 model
+# -----------------------------
 model = models.resnet18(weights=None)
 model.fc = nn.Linear(model.fc.in_features, len(CLASS_NAMES))
 
 checkpoint = torch.load(MODEL_PATH, map_location=device)
 
-# If model was saved as state_dict
 if isinstance(checkpoint, dict):
     try:
         model.load_state_dict(checkpoint)
@@ -40,6 +62,9 @@ else:
 model.to(device)
 model.eval()
 
+# -----------------------------
+# Image preprocessing
+# -----------------------------
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -49,9 +74,13 @@ transform = transforms.Compose([
     )
 ])
 
+# -----------------------------
+# Routes
+# -----------------------------
 @app.route("/")
 def home():
     return send_file(HTML_PATH)
+
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -89,14 +118,20 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/predict", methods=["POST"])
 def api_predict():
     return predict()
+
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
     return predict()
 
+
+# -----------------------------
+# Run app
+# -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
