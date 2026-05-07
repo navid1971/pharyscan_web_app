@@ -15,8 +15,8 @@ app = Flask(__name__)
 MODEL_PATH = "best_resnet18_pharyngitis.pth"
 HTML_PATH = "pharyscan_web_app.html"
 
-# Google Drive model link
-MODEL_URL = "https://drive.google.com/file/d/1nhaLsnCFmxj-WtnEPM6haATWY9VXVp2L/view?usp=sharing"
+# Direct Google Drive download link
+MODEL_URL = "https://drive.google.com/uc?id=1nhaLsnCFmxj-WtnEPM6haATWY9VXVp2L"
 
 CLASS_NAMES = ["no_pharyngitis", "pharyngitis"]
 
@@ -25,10 +25,12 @@ CLASS_NAMES = ["no_pharyngitis", "pharyngitis"]
 # -----------------------------
 if not os.path.exists(MODEL_PATH):
     print("Model not found. Downloading from Google Drive...")
-    gdown.download(MODEL_URL, MODEL_PATH, quiet=False, fuzzy=True)
+    gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
 
     if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError("Model download failed. Check Google Drive sharing settings.")
+        raise FileNotFoundError(
+            "Model download failed. Check Google Drive sharing settings."
+        )
 
     print("Model downloaded successfully.")
 
@@ -49,14 +51,12 @@ if isinstance(checkpoint, dict):
     try:
         model.load_state_dict(checkpoint)
     except RuntimeError:
-        # Fix for models saved with "module." prefix
         new_checkpoint = {}
         for k, v in checkpoint.items():
             new_key = k.replace("module.", "")
             new_checkpoint[new_key] = v
         model.load_state_dict(new_checkpoint)
 else:
-    # If full model was saved
     model = checkpoint
 
 model.to(device)
