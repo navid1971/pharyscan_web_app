@@ -82,15 +82,27 @@ def home():
     return send_file(HTML_PATH)
 
 
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
 @app.route("/predict", methods=["POST"])
+@app.route("/api/predict", methods=["POST"])
+@app.route("/analyze", methods=["POST"])
+@app.route("/upload", methods=["POST"])
+@app.route("/infer", methods=["POST"])
+@app.route("/run_inference", methods=["POST"])
 def predict():
     try:
-        if "image" in request.files:
-            file = request.files["image"]
-        elif "file" in request.files:
-            file = request.files["file"]
-        else:
-            return jsonify({"error": "No image file uploaded"}), 400
+        if not request.files:
+            return jsonify({
+                "success": False,
+                "error": "No image file uploaded"
+            }), 400
+
+        # Accept any frontend file field name: image, file, upload, etc.
+        file = next(iter(request.files.values()))
 
         image = Image.open(file.stream).convert("RGB")
         input_tensor = transform(image).unsqueeze(0).to(device)
@@ -103,30 +115,30 @@ def predict():
         predicted_class = CLASS_NAMES[predicted_idx.item()]
         confidence_score = round(confidence.item() * 100, 2)
 
+        no_phar_score = round(probabilities[0].item() * 100, 2)
+        phar_score = round(probabilities[1].item() * 100, 2)
+
         return jsonify({
+            "success": True,
             "prediction": predicted_class,
             "class": predicted_class,
             "label": predicted_class,
+            "result": predicted_class,
             "confidence": confidence_score,
             "confidence_score": confidence_score,
+            "no_pharyngitis": no_phar_score,
+            "pharyngitis": phar_score,
             "probabilities": {
-                CLASS_NAMES[0]: round(probabilities[0].item() * 100, 2),
-                CLASS_NAMES[1]: round(probabilities[1].item() * 100, 2)
+                "no_pharyngitis": no_phar_score,
+                "pharyngitis": phar_score
             }
         })
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/predict", methods=["POST"])
-def api_predict():
-    return predict()
-
-
-@app.route("/analyze", methods=["POST"])
-def analyze():
-    return predict()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
 # -----------------------------
