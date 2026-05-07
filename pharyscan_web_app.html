@@ -2144,111 +2144,207 @@ header{
     </div>
   </footer>
 </div>
-
 <script>
   const fileInput  = document.getElementById('fileInput');
   const previewImg = document.getElementById('previewImg');
   const dropzone   = document.getElementById('dropzone');
   const runBtn     = document.getElementById('runBtn');
   const cancelBtn  = document.getElementById('cancelBtn');
+
   let selectedFile = null;
 
   fileInput.addEventListener('change', e => {
     const file = e.target.files[0];
+
     if (!file) return;
+
     selectedFile = file;
+
     const url = URL.createObjectURL(file);
     previewImg.src = url;
     previewImg.style.display = 'block';
+
     dropzone.querySelector('h3').textContent = file.name;
-    dropzone.querySelector('p').textContent  = (file.size/1024).toFixed(1) + ' KB · Ready to analyse';
+    dropzone.querySelector('p').textContent =
+      (file.size / 1024).toFixed(1) + ' KB · Ready to analyse';
+
     dropzone.querySelector('.upload-icon').style.display = 'none';
-    runBtn.disabled    = false;
+
+    runBtn.disabled = false;
     cancelBtn.disabled = false;
   });
 
-  ['dragenter','dragover'].forEach(ev =>
-    dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag'); }));
-  ['dragleave','drop'].forEach(ev =>
-    dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+  ['dragenter', 'dragover'].forEach(ev => {
+    dropzone.addEventListener(ev, e => {
+      e.preventDefault();
+      dropzone.classList.add('drag');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(ev => {
+    dropzone.addEventListener(ev, e => {
+      e.preventDefault();
+      dropzone.classList.remove('drag');
+    });
+  });
+
   dropzone.addEventListener('drop', e => {
     const file = e.dataTransfer.files[0];
+
     if (!file) return;
-    const dt = new DataTransfer(); dt.items.add(file);
+
+    const dt = new DataTransfer();
+    dt.items.add(file);
+
     fileInput.files = dt.files;
     fileInput.dispatchEvent(new Event('change'));
   });
 
   function cancelUpload() {
     selectedFile = null;
+
     fileInput.value = '';
     previewImg.style.display = 'none';
     previewImg.src = '';
+
     dropzone.querySelector('h3').textContent = 'Click or drag image here';
-    dropzone.querySelector('p').textContent  = 'Supported: JPG, PNG · Max 15MB';
+    dropzone.querySelector('p').textContent = 'Supported: JPG, PNG · Max 15MB';
     dropzone.querySelector('.upload-icon').style.display = 'flex';
-    runBtn.disabled    = true;
+
+    runBtn.disabled = true;
     cancelBtn.disabled = true;
 
-    // Reset result panel
-    document.getElementById('idleState').style.display    = 'block';
-    document.getElementById('loadingState').style.display  = 'none';
+    document.getElementById('idleState').style.display = 'block';
+    document.getElementById('loadingState').style.display = 'none';
     document.getElementById('resultContent').style.display = 'none';
 
-    // Reset bars
     document.getElementById('noPharBar').style.width = '0%';
-    document.getElementById('pharBar').style.width   = '0%';
+    document.getElementById('pharBar').style.width = '0%';
+
+    document.getElementById('noPharConf').textContent = '—%';
+    document.getElementById('pharConf').textContent = '—%';
+    document.getElementById('symCount').textContent = '0';
   }
 
-  function toggleSym(el) { el.classList.toggle('active'); }
+  function toggleSym(el) {
+    el.classList.toggle('active');
+  }
 
   async function runInference() {
-    if (!selectedFile) return;
-    document.getElementById('idleState').style.display    = 'none';
+    if (!selectedFile) {
+      alert('Please upload an image first.');
+      return;
+    }
+
+    document.getElementById('idleState').style.display = 'none';
     document.getElementById('loadingState').style.display = 'block';
-    document.getElementById('resultContent').style.display= 'none';
-    runBtn.disabled    = true;
+    document.getElementById('resultContent').style.display = 'none';
+
+    runBtn.disabled = true;
     cancelBtn.disabled = true;
 
     try {
       const fd = new FormData();
       fd.append('image', selectedFile);
-      const res  = await fetch('/predict', { method:'POST', body:fd });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
 
-      const pharConf = data.pharyngitis_prob    * 100;
-      const noConf   = data.no_pharyngitis_prob * 100;
-      const hasPhar  = data.prediction === 'pharyngitis';
+      const res = await fetch('/predict', {
+        method: 'POST',
+        body: fd
+      });
 
-      document.getElementById('loadingState').style.display  = 'none';
+      const text = await res.text();
+
+      if (!text || text.trim() === '') {
+        throw new Error('Server returned an empty response. Check Render logs.');
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (jsonError) {
+        throw new Error('Server returned invalid JSON: ' + text.slice(0, 300));
+      }
+
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || 'Inference request failed.');
+      }
+
+      const pharConf = Number(
+        data.pharyngitis ??
+        data.pharyngitis_prob ??
+        data.probabilities?.pharyngitis ??
+        0
+      );
+
+      const noConf = Number(
+        data.no_pharyngitis ??
+        data.no_pharyngitis_prob ??
+        data.probabilities?.no_pharyngitis ??
+        0
+      );
+
+      const prediction = String(
+        data.prediction ||
+        data.class ||
+        data.label ||
+        data.result ||
+        ''
+      ).toLowerCase();
+
+      const hasPhar = prediction === 'pharyngitis';
+
+      document.getElementById('loadingState').style.display = 'none';
       document.getElementById('resultContent').style.display = 'block';
 
       const vBox = document.getElementById('verdictBox');
+
       vBox.className = 'verdict ' + (hasPhar ? 'positive' : 'negative');
-      document.getElementById('resultTag').className   = 'result-tag ' + (hasPhar ? 'positive' : 'negative');
-      document.getElementById('resultTag').textContent = hasPhar ? '⚠ Pharyngitis Detected' : '✓ No Pharyngitis';
-      document.getElementById('verdictLabel').textContent = hasPhar ? 'Detected' : 'Clear';
-      document.getElementById('verdictIcon').textContent  = hasPhar ? '🔴' : '🟢';
-      document.getElementById('verdictText').textContent  = hasPhar ? 'Pharyngitis' : 'No Pharyngitis';
-      document.getElementById('noPharConf').textContent   = noConf.toFixed(2)   + '%';
-      document.getElementById('pharConf').textContent     = pharConf.toFixed(2) + '%';
+
+      document.getElementById('resultTag').className =
+        'result-tag ' + (hasPhar ? 'positive' : 'negative');
+
+      document.getElementById('resultTag').textContent =
+        hasPhar ? '⚠ Pharyngitis Detected' : '✓ No Pharyngitis';
+
+      document.getElementById('verdictLabel').textContent =
+        hasPhar ? 'Detected' : 'Clear';
+
+      document.getElementById('verdictIcon').textContent =
+        hasPhar ? '🔴' : '🟢';
+
+      document.getElementById('verdictText').textContent =
+        hasPhar ? 'Pharyngitis' : 'No Pharyngitis';
+
+      document.getElementById('noPharConf').textContent =
+        noConf.toFixed(2) + '%';
+
+      document.getElementById('pharConf').textContent =
+        pharConf.toFixed(2) + '%';
 
       setTimeout(() => {
-        document.getElementById('noPharBar').style.width = noConf.toFixed(1)   + '%';
-        document.getElementById('pharBar').style.width   = pharConf.toFixed(1) + '%';
+        document.getElementById('noPharBar').style.width =
+          Math.max(0, Math.min(100, noConf)).toFixed(1) + '%';
+
+        document.getElementById('pharBar').style.width =
+          Math.max(0, Math.min(100, pharConf)).toFixed(1) + '%';
       }, 120);
 
       document.getElementById('symCount').textContent =
         document.querySelectorAll('.sym-item.active').length;
-    } catch(err) {
+
+    } catch (err) {
       document.getElementById('loadingState').style.display = 'none';
-      document.getElementById('idleState').style.display    = 'block';
+      document.getElementById('idleState').style.display = 'block';
+      document.getElementById('resultContent').style.display = 'none';
+
       alert('Inference error: ' + err.message);
+    } finally {
+      runBtn.disabled = false;
+      cancelBtn.disabled = false;
     }
-    runBtn.disabled    = false;
-    cancelBtn.disabled = false;
   }
 </script>
+
+    
 </body>
 </html>
